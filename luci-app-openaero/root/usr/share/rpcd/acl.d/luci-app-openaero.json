@@ -1,0 +1,27 @@
+{
+  "luci-app-openaero": {
+    "description": "Grant access to OpenAero procedures and configuration",
+    "read": {
+      "uci": [ "openaero" ],
+      "file": {
+        "/etc/openaero/*": [ "read" ],
+        "/var/log/openaero.log": [ "read" ]
+      },
+      "ubus": {
+        "file": [ "read", "stat", "list" ],
+        "service": [ "list" ]
+      },
+      "cgi-io": [ "exec" ]
+    },
+    "write": {
+      "uci": [ "openaero" ],
+      "file": {
+        "/etc/openaero/*": [ "write" ]
+      },
+      "ubus": {
+        "file": [ "write", "exec" ],
+        "service": [ "event" ]
+      }
+    }
+  }
+}

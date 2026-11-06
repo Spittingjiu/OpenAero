@@ -1,0 +1,21 @@
+# 敏感配置与密钥
+.env
+*.pem
+*.key
+secrets/
+.api_token
+
+# 编译产物与二进制依赖
+bin/
+*.ipk
+openaero-core-arm64
+openaero-core/openaero-core
+openaero-core/openaero-core-*
+
+# 临时文件与备份
+__pycache__/
+*.pyc
+*.bak*
+*.tmp
+scripts/tmp/
+scripts/dev/

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Automatically restore OpenAero firewall & policy routes when LAN/WAN interfaces reconnect (with flock anti-reentrancy guard)
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] || exit 0
+case "$INTERFACE" in
+	lan|wan|wan6)
+		(
+			flock -n 200 || exit 0
+			if pidof sing-box >/dev/null 2>&1; then
+				logger -t openaero "Interface $INTERFACE ($ACTION) event detected, re-applying firewall & policy routes..."
+				/etc/init.d/openaero reload_firewall >/dev/null 2>&1
+			fi
+		) 200>/var/lock/openaero_hotplug.lock &
+		;;
+esac

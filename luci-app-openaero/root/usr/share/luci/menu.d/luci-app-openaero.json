@@ -1,0 +1,58 @@
+{
+  "admin/services/openaero": {
+    "title": "OpenAero",
+    "order": 45,
+    "action": {
+      "type": "alias",
+      "path": "admin/services/openaero/overview"
+    },
+    "depends": {
+      "acl": [
+        "luci-app-openaero"
+      ]
+    }
+  },
+  "admin/services/openaero/overview": {
+    "title": "📊 运行概览",
+    "order": 10,
+    "action": {
+      "type": "view",
+      "path": "openaero/overview",
+      "version": "20261106.13"
+    }
+  },
+  "admin/services/openaero/nodes": {
+    "title": "🌐 节点与分流",
+    "order": 20,
+    "action": {
+      "type": "view",
+      "path": "openaero/overview",
+      "version": "20261106.13"
+    }
+  },
+  "admin/services/openaero/rules": {
+    "title": "🛡️ 规则与设备",
+    "order": 30,
+    "action": {
+      "type": "view",
+      "path": "openaero/overview",
+      "version": "20261106.13"
+    }
+  },
+  "admin/services/openaero/settings": {
+    "title": "⚙️ 系统与订阅",
+    "order": 40,
+    "action": {
+      "type": "view",
+      "path": "openaero/overview",
+      "version": "20261106.13"
+    }
+  },
+  "admin/services/openaero/proxy": {
+    "action": {
+      "type": "call",
+      "module": "luci.controller.openaero",
+      "function": "action_proxy"
+    }
+  }
+}

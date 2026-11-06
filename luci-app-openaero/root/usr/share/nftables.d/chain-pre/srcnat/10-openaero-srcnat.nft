@@ -1,0 +1,2 @@
+fib saddr type local return comment "!openaero: bypass local router outbound from SNAT"
+oifname "openaero0" return comment "!openaero: preserve LAN client original IP"

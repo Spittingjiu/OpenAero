@@ -1,0 +1,192 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+EXTRA_COMMANDS="reload_firewall"
+EXTRA_HELP="	reload_firewall	Re-apply OpenAero firewall and policy routing rules"
+
+CONF="openaero"
+PROG="/usr/bin/sing-box"
+DAEMON="/usr/bin/openaero-core"
+CONFIG_FILE="/etc/openaero/run_config.json"
+
+apply_policy_routes() {
+	ip route replace default dev openaero0 table 2022 2>/dev/null
+	ip route replace 198.18.0.0/15 dev openaero0 table 2022 2>/dev/null
+	ip route replace 198.18.0.0/15 dev openaero0 2>/dev/null
+	ip rule list | grep -q "fwmark 0x1 lookup 2022" || ip rule add fwmark 1 table 2022 2>/dev/null
+	while ip rule del priority 8987 2>/dev/null; do :; done
+	ip rule add to 223.5.5.5 ipproto tcp lookup main priority 8987 2>/dev/null
+	ip rule add to 119.29.29.29 ipproto tcp lookup main priority 8987 2>/dev/null
+	while ip rule del priority 8988 2>/dev/null; do :; done
+	ip rule add to 198.18.0.0/15 lookup 2022 priority 8988 2>/dev/null
+	while ip rule del priority 8989 2>/dev/null; do :; done
+	ip rule add ipproto icmp lookup main priority 8989 2>/dev/null
+}
+
+apply_firewall_rules() {
+	local ipv6_en
+	if [ -f "/etc/openaero/config.json" ]; then
+		ipv6_en=$(jsonfilter -i /etc/openaero/config.json -e '@.ipv6_enabled' 2>/dev/null || echo false)
+	else
+		ipv6_en="false"
+	fi
+
+	if which nft >/dev/null 2>&1; then
+		mkdir -p /usr/share/nftables.d/chain-post/dstnat /usr/share/nftables.d/chain-pre/srcnat /usr/share/nftables.d/chain-pre/forward
+		cat << 'EOF' > /usr/share/nftables.d/chain-post/dstnat/30-openaero.nft
+udp dport 53 redirect to :1053 comment "!openaero: redirect DNS"
+tcp dport 53 redirect to :1053 comment "!openaero: redirect DNS"
+EOF
+		cat << 'EOF' > /usr/share/nftables.d/chain-pre/srcnat/10-openaero-srcnat.nft
+oifname "openaero0" return comment "!openaero: preserve LAN client original IP"
+EOF
+		if [ "$ipv6_en" != "true" ]; then
+			cat << 'EOF' > /usr/share/nftables.d/chain-pre/forward/10-openaero-ipv6.nft
+meta nfproto ipv6 oifname != "openaero0" counter reject comment "!openaero: ipv6 leak guard"
+EOF
+			for h in $(nft -a list chain inet fw4 forward 2>/dev/null | grep -E 'ipv6.*openaero0|!openaero: ipv6' | awk '{print $NF}'); do
+				nft delete rule inet fw4 forward handle "$h" 2>/dev/null
+			done
+			nft 'insert rule inet fw4 forward meta nfproto ipv6 oifname != "openaero0" counter reject comment "!openaero: ipv6 leak guard"' 2>/dev/null
+		else
+			rm -f /usr/share/nftables.d/chain-pre/forward/10-openaero-ipv6.nft 2>/dev/null
+			for h in $(nft -a list chain inet fw4 forward 2>/dev/null | grep -E 'ipv6.*openaero0|!openaero: ipv6' | awk '{print $NF}'); do
+				nft delete rule inet fw4 forward handle "$h" 2>/dev/null
+			done
+		fi
+		fw4 reload >/dev/null 2>&1 || true
+		nft list chain inet fw4 dstnat 2>/dev/null | grep -q "!openaero: redirect DNS" || {
+			nft add rule inet fw4 dstnat udp dport 53 redirect to :1053 comment "!openaero: redirect DNS" 2>/dev/null
+			nft add rule inet fw4 dstnat tcp dport 53 redirect to :1053 comment "!openaero: redirect DNS" 2>/dev/null
+		}
+		nft list chain inet fw4 forward 2>/dev/null | grep -q "!openaero: forward openaero0" || {
+			nft insert rule inet fw4 forward oifname "openaero0" accept comment "!openaero: forward openaero0" 2>/dev/null
+			nft insert rule inet fw4 forward iifname "openaero0" accept comment "!openaero: forward openaero0" 2>/dev/null
+		}
+		nft list chain inet fw4 srcnat 2>/dev/null | grep -q "openaero0" || {
+			nft insert rule inet fw4 srcnat oifname "openaero0" return comment "!openaero: preserve LAN client original IP" 2>/dev/null
+		}
+	elif which iptables >/dev/null 2>&1; then
+		iptables -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 1053 -m comment --comment "!openaero: redirect DNS" 2>/dev/null || \
+			iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 1053 -m comment --comment "!openaero: redirect DNS" 2>/dev/null
+		iptables -t nat -C PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 1053 -m comment --comment "!openaero: redirect DNS" 2>/dev/null || \
+			iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 1053 -m comment --comment "!openaero: redirect DNS" 2>/dev/null
+		iptables -C FORWARD -o openaero0 -j ACCEPT -m comment --comment "!openaero: forward openaero0" 2>/dev/null || \
+			iptables -I FORWARD -o openaero0 -j ACCEPT -m comment --comment "!openaero: forward openaero0" 2>/dev/null
+		iptables -C FORWARD -i openaero0 -j ACCEPT -m comment --comment "!openaero: forward openaero0" 2>/dev/null || \
+			iptables -I FORWARD -i openaero0 -j ACCEPT -m comment --comment "!openaero: forward openaero0" 2>/dev/null
+	fi
+}
+
+remove_firewall_rules() {
+	# 27-Audit Defect 9: Remove all persistent drop-in nft files BEFORE reloading firewall
+	# so fw4 reload never re-injects port 53 -> 1053 DNS redirect when sing-box is stopped!
+	rm -f /usr/share/nftables.d/chain-post/dstnat/30-openaero.nft \
+	      /usr/share/nftables.d/chain-post/dstnat/20-openaero-acl.nft \
+	      /usr/share/nftables.d/table-post/10-openaero-acl.nft \
+	      /usr/share/nftables.d/chain-pre/srcnat/10-openaero-srcnat.nft 2>/dev/null
+	find /usr/share/nftables.d -name "*openaero*" -exec rm -f {} \; 2>/dev/null
+	if which nft >/dev/null 2>&1; then
+		if [ -x "/etc/init.d/firewall" ]; then
+			/etc/init.d/firewall reload >/dev/null 2>&1
+		else
+			fw4 reload >/dev/null 2>&1 || true
+		fi
+		for chain in dstnat forward srcnat input output; do
+			for h in $(nft -a list chain inet fw4 "$chain" 2>/dev/null | grep -i "openaero" | awk '{print $NF}'); do
+				nft delete rule inet fw4 "$chain" handle "$h" 2>/dev/null
+			done
+		done
+		nft flush set inet fw4 openaero_bypass 2>/dev/null
+		nft delete set inet fw4 openaero_bypass 2>/dev/null
+		nft flush set inet fw4 openaero_bypass_macs 2>/dev/null
+		nft delete set inet fw4 openaero_bypass_macs 2>/dev/null
+	elif which iptables >/dev/null 2>&1; then
+		iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 1053 -m comment --comment "!openaero: redirect DNS" 2>/dev/null
+		iptables -t nat -D PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 1053 -m comment --comment "!openaero: redirect DNS" 2>/dev/null
+		iptables -D FORWARD -o openaero0 -j ACCEPT -m comment --comment "!openaero: forward openaero0" 2>/dev/null
+		iptables -D FORWARD -i openaero0 -j ACCEPT -m comment --comment "!openaero: forward openaero0" 2>/dev/null
+	fi
+}
+
+reload_firewall() {
+	if pidof sing-box >/dev/null 2>&1; then
+		apply_policy_routes
+		apply_firewall_rules
+	fi
+}
+
+start_service() {
+	local enabled
+	config_load "$CONF"
+	config_get_bool enabled "config" "enabled" 0
+	[ "$enabled" -eq 0 ] && return 0
+
+	mkdir -p /etc/openaero /etc/openaero/rules /var/log/openaero
+
+	# Disable ICMP Redirects on single-arm bypass gateway (23-Audit Defect 4)
+	sysctl -w net.ipv4.conf.all.send_redirects=0 >/dev/null 2>&1
+	sysctl -w net.ipv4.conf.default.send_redirects=0 >/dev/null 2>&1
+	sysctl -w net.ipv4.conf.br-lan.send_redirects=0 >/dev/null 2>&1
+
+	# 1. Start sing-box main engine first so openaero-core finds its PID via procd
+	if [ -f "$CONFIG_FILE" ]; then
+		procd_open_instance openaero_core
+		procd_set_param command "$PROG" run -c "$CONFIG_FILE"
+		procd_set_param respawn 3600 1 0
+		procd_set_param stdout 1
+		procd_set_param stderr 1
+		procd_close_instance
+	fi
+
+	# 2. Start openaero-core daemon
+	if [ -x "$DAEMON" ]; then
+		procd_open_instance openaero_daemon
+		procd_set_param command "$DAEMON" -c "$CONFIG_FILE"
+		procd_set_param respawn 3600 1 0
+		procd_set_param stdout 1
+		procd_set_param stderr 1
+		procd_close_instance
+	fi
+
+	sleep 1
+	apply_policy_routes
+
+	# 3. Apply native fw4 / fw3 firewall redirection rules
+	apply_firewall_rules
+
+	echo "OpenAero service started with native firewall hooks."
+}
+
+stop_service() {
+	procd_kill "$(basename ${basescript:-$initscript})" 2>/dev/null
+	killall -TERM openaero-core 2>/dev/null
+	killall -TERM sing-box 2>/dev/null
+	sleep 1
+	killall -9 openaero-core 2>/dev/null
+	killall -9 sing-box 2>/dev/null
+	remove_firewall_rules
+	ip route flush table 2022 2>/dev/null
+	ip route del 198.18.0.0/15 dev openaero0 2>/dev/null
+	while ip rule del fwmark 1 table 2022 2>/dev/null; do :; done
+	for prio in 8987 8988 8989 8990; do
+		while ip rule del priority "$prio" 2>/dev/null; do :; done
+	done
+	echo "OpenAero service stopped and firewall restored."
+}
+
+service_stopped() {
+	killall -9 openaero-core 2>/dev/null
+	killall -9 sing-box 2>/dev/null
+	remove_firewall_rules
+	ip route flush table 2022 2>/dev/null
+	ip route del 198.18.0.0/15 dev openaero0 2>/dev/null
+}
+
+reload_service() {
+	stop
+	sleep 1
+	start
+}
