@@ -69,12 +69,24 @@ func TestNodeViaClashAPI(nodeTag string, clashPort int, timeout time.Duration) (
 	// 1. Primary: https://www.gstatic.com/generate_204 (hits ORTT prewarmed 443 pool)
 	delay, err := probeSingleClashDelay(nodeTag, PrimaryProbeURL, clashPort, timeoutMs)
 	if err == nil && delay > 0 {
+		// Warm-up second sample: if cold-start TLS/Reality handshake inflated latency > 300ms,
+		// immediately take a second measurement on the warmed path and keep the lower RTT.
+		if delay > 300 {
+			if delay2, err2 := probeSingleClashDelay(nodeTag, PrimaryProbeURL, clashPort, 2000); err2 == nil && delay2 > 0 && delay2 < delay {
+				delay = delay2
+			}
+		}
 		return delay, nil
 	}
 
 	// 2. Backup: https://cp.cloudflare.com/generate_204
 	delay, backupErr := probeSingleClashDelay(nodeTag, BackupProbeURL, clashPort, timeoutMs)
 	if backupErr == nil && delay > 0 {
+		if delay > 300 {
+			if delay2, err2 := probeSingleClashDelay(nodeTag, BackupProbeURL, clashPort, 2000); err2 == nil && delay2 > 0 && delay2 < delay {
+				delay = delay2
+			}
+		}
 		return delay, nil
 	}
 
@@ -89,8 +101,8 @@ func TestNodesConcurrently(nodeList []config.Node, concurrency int, timeout time
 	results := make([]config.Node, len(nodeList))
 	copy(results, nodeList)
 
-	if concurrency <= 0 {
-		concurrency = 10 // Max 10 worker pool to prevent CPU spike (OA-SPEC-P1-03 AC-03)
+	if concurrency <= 0 || concurrency > 4 {
+		concurrency = 4 // Tuned to 4 to eliminate Reality X25519 CPU scheduling delay on embedded ARM64
 	}
 	if timeout <= 0 {
 		timeout = 3500 * time.Millisecond

@@ -61,9 +61,11 @@ func CheckKernelRulesAndRoutes(isFakeIP bool, fakeRange string) (bool, bool) {
 
 	ip223 := net.ParseIP("223.5.5.5")
 	ip119 := net.ParseIP("119.29.29.29")
+	ipLan := net.ParseIP("192.168.0.0")
 
 	has8987_223 := false
 	has8987_119 := false
+	has8987_lan := false
 	has8987_other := false
 	has8988 := false
 	has8989 := false
@@ -103,6 +105,8 @@ func CheckKernelRulesAndRoutes(isFakeIP bool, fakeRange string) (bool, bool) {
 				has8987_223 = true
 			} else if dstIP != nil && dstIP.Equal(ip119) && dstLen == 32 {
 				has8987_119 = true
+			} else if dstIP != nil && dstIP.Equal(ipLan) && dstLen == 16 {
+				has8987_lan = true
 			} else {
 				has8987_other = true
 			}
@@ -119,7 +123,7 @@ func CheckKernelRulesAndRoutes(isFakeIP bool, fakeRange string) (bool, bool) {
 		}
 	}
 
-	rulesOK := has8987_223 && has8987_119 && (has8987_other || count8987 >= 3) && has8989
+	rulesOK := has8987_223 && has8987_119 && has8987_lan && (has8987_other || count8987 >= 4) && has8989
 	if isFakeIP && !has8988 {
 		rulesOK = false
 	}
@@ -134,6 +138,7 @@ func CheckKernelRulesAndRoutes(isFakeIP bool, fakeRange string) (bool, bool) {
 		return rulesOK, false
 	}
 
+	hasSplitRoutes := false
 	hasDefaultRoute := false
 	hasFakeRoute := false
 
@@ -162,6 +167,8 @@ func CheckKernelRulesAndRoutes(isFakeIP bool, fakeRange string) (bool, bool) {
 		if table == 2022 {
 			if dstLen == 0 {
 				hasDefaultRoute = true
+			} else if dstLen >= 1 && dstLen <= 8 {
+				hasSplitRoutes = true
 			}
 			if isFakeIP {
 				if expectedFakeIP != nil && dstIP != nil && dstIP.Equal(expectedFakeIP) && dstLen == expectedFakeDstLen {
@@ -173,9 +180,18 @@ func CheckKernelRulesAndRoutes(isFakeIP bool, fakeRange string) (bool, bool) {
 		}
 	}
 
-	routesOK := hasDefaultRoute
-	if isFakeIP && !hasFakeRoute {
-		routesOK = false
+	routesOK := false
+	if hasSplitRoutes {
+		// Crucial anti-looping rule: When sing-box auto_route generated split routes,
+		// table 2022 MUST NOT have a default (0.0.0.0/0) route that captures route_exclude_address.
+		if !hasDefaultRoute && (!isFakeIP || hasFakeRoute) {
+			routesOK = true
+		}
+	} else {
+		// Fallback when sing-box auto_route split routes are not present
+		if hasDefaultRoute && (!isFakeIP || hasFakeRoute) {
+			routesOK = true
+		}
 	}
 
 	return rulesOK, routesOK

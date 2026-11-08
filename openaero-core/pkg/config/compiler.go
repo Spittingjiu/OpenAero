@@ -1654,10 +1654,13 @@ func EnsureTunRoutes(cfg *AppConfig) {
 		return
 	}
 
-	// 1. Repair kernel policy rules only if missing (all-protocol for 223.5.5.5 / 119.29.29.29)
+	// 1. Repair kernel policy rules only if missing (all-protocol for 223.5.5.5 / 119.29.29.29 / 192.168.0.0/16)
 	if !rulesOK {
 		ruleOut, _ := exec.Command("ip", "rule", "show").Output()
 		ruleStr := string(ruleOut)
+		if !strings.Contains(ruleStr, "192.168.0.0/16") {
+			_ = exec.Command("ip", "rule", "add", "to", "192.168.0.0/16", "lookup", "main", "priority", "8987").Run()
+		}
 		if !strings.Contains(ruleStr, "to 223.5.5.5") || !strings.Contains(ruleStr, "8987:") {
 			_ = exec.Command("ip", "rule", "add", "to", "223.5.5.5", "lookup", "main", "priority", "8987").Run()
 		}
@@ -1675,9 +1678,19 @@ func EnsureTunRoutes(cfg *AppConfig) {
 		}
 	}
 
-	// 2. Repair table 2022 routes only if missing
+	// 2. Repair table 2022 routes only if missing (anti-looping: delete default route if split routes exist)
 	if !routesOK {
-		_ = exec.Command("ip", "route", "replace", "default", "dev", "openaero0", "table", "2022").Run()
+		routeOut, _ := exec.Command("ip", "route", "show", "table", "2022").Output()
+		routeStr := string(routeOut)
+		hasSplit := strings.Contains(routeStr, "0.0.0.0/5") || strings.Contains(routeStr, "8.0.0.0/7")
+		hasDefault := strings.Contains(routeStr, "default dev openaero0") || strings.Contains(routeStr, "default via")
+
+		if hasSplit && hasDefault {
+			_ = exec.Command("ip", "route", "del", "default", "dev", "openaero0", "table", "2022").Run()
+		} else if !hasSplit && !hasDefault {
+			_ = exec.Command("ip", "route", "replace", "default", "dev", "openaero0", "table", "2022").Run()
+		}
+
 		if isFakeIP {
 			_ = exec.Command("ip", "route", "replace", fakeRange, "dev", "openaero0", "table", "2022").Run()
 			_ = exec.Command("ip", "route", "replace", fakeRange, "dev", "openaero0").Run()

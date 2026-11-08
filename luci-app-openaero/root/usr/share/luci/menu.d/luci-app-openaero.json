@@ -18,7 +18,7 @@
     "action": {
       "type": "view",
       "path": "openaero/overview",
-      "version": "20261106.13"
+      "version": "20261108.17"
     }
   },
   "admin/services/openaero/nodes": {
@@ -27,7 +27,7 @@
     "action": {
       "type": "view",
       "path": "openaero/overview",
-      "version": "20261106.13"
+      "version": "20261108.17"
     }
   },
   "admin/services/openaero/rules": {
@@ -36,7 +36,7 @@
     "action": {
       "type": "view",
       "path": "openaero/overview",
-      "version": "20261106.13"
+      "version": "20261108.17"
     }
   },
   "admin/services/openaero/settings": {
@@ -45,7 +45,7 @@
     "action": {
       "type": "view",
       "path": "openaero/overview",
-      "version": "20261106.13"
+      "version": "20261108.17"
     }
   },
   "admin/services/openaero/proxy": {

@@ -1169,7 +1169,7 @@ return view.extend({
 			var s = cfg.subscriptions[0];
 			var infoCard = E('div', { 'style': 'margin-top: 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; font-size: 13px; color: #475569;' }, [
 				E('div', { 'style': 'font-weight: 600; margin-bottom: 6px; color: #1e293b;' }, '当前订阅状态：'),
-				E('div', {}, '已托管节点：' + (s.node_count || 11) + ' 个'),
+				E('div', {}, '已托管节点：' + (s.node_count || (self.nodesCache && self.nodesCache.length) || 0) + ' 个'),
 				E('div', {}, '最后更新时间：' + (s.last_updated || '刚刚'))
 			]);
 			wrap.appendChild(infoCard);
@@ -1267,12 +1267,17 @@ return view.extend({
 				E('span', { 'style': 'font-size: 12px; color: #64748b;' }, '高性能无损热加载')
 			]),
 			E('div', { 'style': 'display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;' }, [
-				self.createRuleBadge('geosite-google.srs', '7.8 KB', 'Google 专用分流'),
-				self.createRuleBadge('geosite-cn.srs', '56 KB', '国内域名直连'),
-				self.createRuleBadge('geoip-cn.srs', '34 KB', '国内 IP 直连'),
-				self.createRuleBadge('geosite-youtube.srs', '1.2 KB', 'YouTube 专用'),
-				self.createRuleBadge('geosite-openai.srs', '475 B', 'ChatGPT / OpenAI'),
-				self.createRuleBadge('geosite-telegram.srs', '265 B', 'Telegram 专用')
+				self.createRuleBadge('geosite-cn.srs', '440 KB', '国内主流域名直连'),
+				self.createRuleBadge('geoip-cn.srs', '78 KB', '国内 IP 网段直连'),
+				self.createRuleBadge('geosite-category-games@cn.srs', '38 KB', '国内热门游戏直连'),
+				self.createRuleBadge('geosite-steam@cn.srs', '12 KB', 'Steam 国区下载加速'),
+				self.createRuleBadge('geosite-apple@cn.srs', '24 KB', 'Apple 官方服务直连'),
+				self.createRuleBadge('geosite-microsoft@cn.srs', '32 KB', '微软基础服务直连'),
+				self.createRuleBadge('geosite-google-gemini.srs', '1.8 KB', 'Gemini AI 智能分流'),
+				self.createRuleBadge('geosite-openai.srs', '2.4 KB', 'ChatGPT / OpenAI 专属'),
+				self.createRuleBadge('geosite-google.srs', '8.2 KB', 'Google 服务专属'),
+				self.createRuleBadge('geosite-youtube.srs', '1.6 KB', 'YouTube 媒体专用'),
+				self.createRuleBadge('geosite-telegram.srs', '1.1 KB', 'Telegram 专属分流')
 			])
 		]);
 		wrap.appendChild(srsCard);
@@ -1292,10 +1297,12 @@ return view.extend({
 					'style': 'flex: 1; min-width: 180px; padding: 8px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px;'
 				}, [
 					E('option', { 'value': 'direct' }, '🇨🇳 国内直连 (Direct)'),
-					E('option', { 'value': 'proxy' }, '🚀 国际代理 (Proxy)'),
+					E('option', { 'value': 'proxy' }, '🚀 国际代理 (GLOBAL)'),
+					E('option', { 'value': 'gemini' }, '♊ Gemini 策略组'),
+					E('option', { 'value': 'chatgpt' }, '🤖 ChatGPT / OpenAI 策略组'),
 					E('option', { 'value': 'google' }, '🔍 Google 服务策略组'),
 					E('option', { 'value': 'youtube' }, '📺 YouTube 策略组'),
-					E('option', { 'value': 'openai' }, '🤖 OpenAI 策略组')
+					E('option', { 'value': 'telegram' }, '✈️ Telegram 策略组')
 				]),
 				E('button', {
 					'class': 'btn cbi-button-action',
