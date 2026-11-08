@@ -304,7 +304,7 @@ func DiagnoseRouteWithClient(target string, clientIP string, cfg *config.AppConf
 	}
 	if !matched {
 		for _, rp := range cfg.RuleProviders {
-			if rp.Target == "DIRECT" {
+			if rp.Target == "DIRECT" && (rp.Id == "my_whitelist" || rp.Id == "private") {
 				if ok, detail := matchDomainOrIP(cleanTarget, resolvedIP, rp.Domains, rp.Suffixes, rp.Keywords, rp.Ips); ok {
 					report.MatchedRule = fmt.Sprintf("rule_provider:%s (%s)", rp.Id, detail)
 					report.StrategyGroup = "自定义直连 (my_whitelist)"
@@ -401,7 +401,22 @@ func DiagnoseRouteWithClient(target string, clientIP string, cfg *config.AppConf
 		}
 	}
 
-	// [Priority 5] Built-in Domestic CN Direct (DomesticDirectSuffixes + geosite-cn / geoip-cn)
+	// [Priority 5] Built-in Domestic CN Direct (DomesticDirectSuffixes + geosite-games-cn / steam / apple / ms + cncidr / applications)
+	if !matched {
+		domesticGameAndVendorSuffixes := []string{
+			"hypergryph.com", "hg-cdn.com", "mihoyo.com", "hoyoverse.com", "bilibiligame.net",
+			"steamcontent.com", "steamserver.net", "steamstatic.com", "steampowered.com",
+			"apple.com", "icloud.com", "mzstatic.com", "aaplimg.com",
+			"microsoft.com", "msftconnecttest.com", "live.com", "office.com", "azure.cn",
+		}
+		if ok, detail := matchDomainOrIP(cleanTarget, resolvedIP, nil, domesticGameAndVendorSuffixes, []string{"hypergryph", "mihoyo", "bilibili"}, nil); ok {
+			report.MatchedRule = fmt.Sprintf("geosite-games-cn/steam/apple/ms (%s)", detail)
+			report.StrategyGroup = "国内直连 (DIRECT)"
+			report.OutboundType = "direct"
+			report.OutboundNode = "DIRECT (直连出站)"
+			matched = true
+		}
+	}
 	if !matched {
 		if ok, detail := matchDomainOrIP(cleanTarget, resolvedIP, nil, config.DomesticDirectSuffixes, nil, nil); ok {
 			report.MatchedRule = fmt.Sprintf("geosite-cn / domestic_direct (%s)", detail)
@@ -409,6 +424,20 @@ func DiagnoseRouteWithClient(target string, clientIP string, cfg *config.AppConf
 			report.OutboundType = "direct"
 			report.OutboundNode = "DIRECT (直连出站)"
 			matched = true
+		}
+	}
+	if !matched {
+		for _, rp := range cfg.RuleProviders {
+			if rp.Target == "DIRECT" && (rp.Id == "cncidr" || rp.Id == "applications") {
+				if ok, detail := matchDomainOrIP(cleanTarget, resolvedIP, rp.Domains, rp.Suffixes, rp.Keywords, rp.Ips); ok {
+					report.MatchedRule = fmt.Sprintf("rule_provider:%s (%s)", rp.Id, detail)
+					report.StrategyGroup = "国内直连 (DIRECT)"
+					report.OutboundType = "direct"
+					report.OutboundNode = "DIRECT (直连出站)"
+					matched = true
+					break
+				}
+			}
 		}
 	}
 

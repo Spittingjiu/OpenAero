@@ -157,6 +157,9 @@ func (s *Server) getStatusData() map[string]interface{} {
 			activeNode = &nodeList[0]
 		}
 	}
+	if activeNode != nil {
+		activeNode.IsActive = true
+	}
 	if activeNode != nil && activeNode.Id != "auto_select" && activeNode.Latency <= 0 {
 		if delay, err := nodes.TestNodeViaClashAPI(activeNode.Id, 9090, 1200*time.Millisecond); err == nil && delay > 0 {
 			activeNode.Latency = delay
@@ -628,6 +631,10 @@ func (s *Server) handleNodeHotSelect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = config.SaveConfig(c)
+	if req.Group == "GLOBAL" || req.Group == "match" {
+		config.SyncNodesActiveState(nodeList, c.ActiveNodeId)
+		_ = config.SaveNodes(nodeList)
+	}
 	if jsonStr, err := config.CompileSingBoxConfig(c, nodeList); err == nil {
 		_ = config.AtomicWriteFile(config.RunConfigFilePath, []byte(jsonStr), 0644)
 	}

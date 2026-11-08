@@ -137,7 +137,11 @@ func (w *Watchdog) check() {
 		socksPort = 10808
 	}
 
-	proxyAlive := w.probeProxyCanary(socksPort)
+	clashPort := cfg.ClashAPIPort
+	if clashPort <= 0 {
+		clashPort = 9090
+	}
+	proxyAlive := w.probeProxyCanary(socksPort, clashPort)
 	if proxyAlive {
 		if atomic.LoadInt32(&w.proxyFailCount) > 0 {
 			atomic.StoreInt32(&w.proxyFailCount, 0)
@@ -178,10 +182,13 @@ func (w *Watchdog) probeDomesticDNS() bool {
 	return false
 }
 
-func (w *Watchdog) probeProxyCanary(socksPort int) bool {
+func (w *Watchdog) probeProxyCanary(socksPort, clashPort int) bool {
+	if clashPort <= 0 {
+		clashPort = 9090
+	}
 	// 27-Audit Defect 6.1 & 6.2: First probe GLOBAL selector directly via Clash API
 	// so pinned sub-strategy groups (e.g. 'google' group) never mask a dead GLOBAL/main node!
-	if delay, err := nodes.TestNodeViaClashAPI("GLOBAL", 9090, 2000*time.Millisecond); err == nil && delay > 0 {
+	if delay, err := nodes.TestNodeViaClashAPI("GLOBAL", clashPort, 2000*time.Millisecond); err == nil && delay > 0 {
 		return true
 	}
 

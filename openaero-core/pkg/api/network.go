@@ -514,8 +514,8 @@ func ApplyNetworkSettings(cfg *config.AppConfig) {
 	cleanIpRulesByPriority("8988")
 	cleanIpRulesByPriority("8989")
 
-	_ = runCmdLogged("ip", "rule", "add", "to", "223.5.5.5", "ipproto", "tcp", "lookup", "main", "priority", "8987")
-	_ = runCmdLogged("ip", "rule", "add", "to", "119.29.29.29", "ipproto", "tcp", "lookup", "main", "priority", "8987")
+	_ = runCmdLogged("ip", "rule", "add", "to", "223.5.5.5", "lookup", "main", "priority", "8987")
+	_ = runCmdLogged("ip", "rule", "add", "to", "119.29.29.29", "lookup", "main", "priority", "8987")
 	_ = runCmdLogged("ip", "rule", "add", "ipproto", "udp", "dport", "39999", "lookup", "main", "priority", "8987")
 
 	dnsMode := strings.ToLower(strings.TrimSpace(cfg.DnsMode))

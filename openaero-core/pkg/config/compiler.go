@@ -345,6 +345,16 @@ func HasGoodCheckpoint() bool {
 	return err1 == nil && err2 == nil && s1.Size() > 0 && s2.Size() > 0
 }
 
+// SyncNodesActiveState synchronizes the IsActive flag of each node with activeNodeId.
+func SyncNodesActiveState(nodes []Node, activeNodeId string) {
+	if activeNodeId == "" {
+		return
+	}
+	for i := range nodes {
+		nodes[i].IsActive = (nodes[i].Id != "" && nodes[i].Id == activeNodeId)
+	}
+}
+
 // LoadNodes loads all parsed nodes
 func LoadNodes() ([]Node, error) {
 	if _, err := os.Stat(NodesFilePath); os.IsNotExist(err) {
@@ -358,11 +368,17 @@ func LoadNodes() ([]Node, error) {
 	if err := json.Unmarshal(data, &nodes); err != nil {
 		return nil, err
 	}
+	if cfg, err := LoadConfig(); err == nil && cfg != nil && cfg.ActiveNodeId != "" {
+		SyncNodesActiveState(nodes, cfg.ActiveNodeId)
+	}
 	return nodes, nil
 }
 
 // SaveNodes saves nodes to disk atomically (27-Audit Defect 8)
 func SaveNodes(nodes []Node) error {
+	if cfg, err := LoadConfig(); err == nil && cfg != nil && cfg.ActiveNodeId != "" {
+		SyncNodesActiveState(nodes, cfg.ActiveNodeId)
+	}
 	data, err := json.MarshalIndent(nodes, "", "  ")
 	if err != nil {
 		return err
@@ -1631,40 +1647,44 @@ func EnsureTunRoutes(cfg *AppConfig) {
 		ipv6Enabled = cfg.Ipv6Enabled
 	}
 
-	// 1. Check kernel policy rules first; only add if missing
-	ruleOut, _ := exec.Command("ip", "rule", "show").Output()
-	ruleStr := string(ruleOut)
-	if !strings.Contains(ruleStr, "8987:") {
-		_ = exec.Command("ip", "rule", "add", "to", "223.5.5.5", "ipproto", "tcp", "lookup", "main", "priority", "8987").Run()
-		_ = exec.Command("ip", "rule", "add", "to", "119.29.29.29", "ipproto", "tcp", "lookup", "main", "priority", "8987").Run()
-	}
-	if !strings.Contains(ruleStr, "39999") {
-		_ = exec.Command("ip", "rule", "add", "ipproto", "udp", "dport", "39999", "lookup", "main", "priority", "8987").Run()
-	}
-	if isFakeIP && !strings.Contains(ruleStr, "8988:") {
-		_ = exec.Command("ip", "rule", "add", "to", fakeRange, "lookup", "2022", "priority", "8988").Run()
-	}
-	if !strings.Contains(ruleStr, "8989:") {
-		_ = exec.Command("ip", "rule", "add", "ipproto", "icmp", "lookup", "main", "priority", "8989").Run()
-	}
-
-	// 2. Check table 2022 routes first; if already intact, return immediately (0 write forks!)
-	routeOut, _ := exec.Command("ip", "route", "show", "table", "2022").Output()
-	routeStr := string(routeOut)
-	hasDefault := strings.Contains(routeStr, "default") && strings.Contains(routeStr, "openaero0")
-	hasFakeRoute := !isFakeIP || strings.Contains(routeStr, fakeRange)
-
-	if hasDefault && hasFakeRoute {
+	// 0. Zero-fork kernel state check via Netlink RIB (TASK-16)
+	// In steady state, rules and routes are intact in memory -> return immediately (0 forks)!
+	rulesOK, routesOK := CheckKernelRulesAndRoutes(isFakeIP, fakeRange)
+	if rulesOK && routesOK {
 		return
 	}
 
-	_ = exec.Command("ip", "route", "replace", "default", "dev", "openaero0", "table", "2022").Run()
-	if isFakeIP {
-		_ = exec.Command("ip", "route", "replace", fakeRange, "dev", "openaero0", "table", "2022").Run()
-		_ = exec.Command("ip", "route", "replace", fakeRange, "dev", "openaero0").Run()
+	// 1. Repair kernel policy rules only if missing (all-protocol for 223.5.5.5 / 119.29.29.29)
+	if !rulesOK {
+		ruleOut, _ := exec.Command("ip", "rule", "show").Output()
+		ruleStr := string(ruleOut)
+		if !strings.Contains(ruleStr, "to 223.5.5.5") || !strings.Contains(ruleStr, "8987:") {
+			_ = exec.Command("ip", "rule", "add", "to", "223.5.5.5", "lookup", "main", "priority", "8987").Run()
+		}
+		if !strings.Contains(ruleStr, "to 119.29.29.29") || !strings.Contains(ruleStr, "8987:") {
+			_ = exec.Command("ip", "rule", "add", "to", "119.29.29.29", "lookup", "main", "priority", "8987").Run()
+		}
+		if !strings.Contains(ruleStr, "39999") {
+			_ = exec.Command("ip", "rule", "add", "ipproto", "udp", "dport", "39999", "lookup", "main", "priority", "8987").Run()
+		}
+		if isFakeIP && !strings.Contains(ruleStr, "8988:") {
+			_ = exec.Command("ip", "rule", "add", "to", fakeRange, "lookup", "2022", "priority", "8988").Run()
+		}
+		if !strings.Contains(ruleStr, "8989:") {
+			_ = exec.Command("ip", "rule", "add", "ipproto", "icmp", "lookup", "main", "priority", "8989").Run()
+		}
 	}
-	if ipv6Enabled {
-		_ = exec.Command("ip", "-6", "route", "replace", "default", "dev", "openaero0", "table", "2022").Run()
+
+	// 2. Repair table 2022 routes only if missing
+	if !routesOK {
+		_ = exec.Command("ip", "route", "replace", "default", "dev", "openaero0", "table", "2022").Run()
+		if isFakeIP {
+			_ = exec.Command("ip", "route", "replace", fakeRange, "dev", "openaero0", "table", "2022").Run()
+			_ = exec.Command("ip", "route", "replace", fakeRange, "dev", "openaero0").Run()
+		}
+		if ipv6Enabled {
+			_ = exec.Command("ip", "-6", "route", "replace", "default", "dev", "openaero0", "table", "2022").Run()
+		}
 	}
 }
 
